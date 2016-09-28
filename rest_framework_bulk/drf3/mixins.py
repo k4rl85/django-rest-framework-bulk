@@ -1,4 +1,8 @@
 from __future__ import print_function, unicode_literals
+
+from django.shortcuts import get_object_or_404
+from django.core.exceptions import ValidationError
+
 from rest_framework import status
 from rest_framework.mixins import CreateModelMixin
 from rest_framework.response import Response
@@ -70,7 +74,24 @@ class BulkUpdateModelMixin(object):
             many=True,
             partial=partial,
         )
-        serializer.is_valid(raise_exception=True)
+        # XXX: Handle validation for any item in request.data
+        # This must be handled manually because DRF 3.x fail on validation of
+        # UniqueConstrain on ListSerializer
+        # See: https://github.com/miki725/django-rest-framework-bulk/issues/30
+        validated_data = []
+        validation_errors = []
+        for item in request.data:
+            item_serializer = self.get_serializer(
+                get_object_or_404(self.filter_queryset(self.get_queryset()), pk=item['id']),
+                data=item,
+                partial=partial,
+            )
+            if not item_serializer.is_valid():
+                validation_errors.append(item_serializer.errors)
+            validated_data.append(item_serializer.validated_data)
+        if validation_errors:
+            raise ValidationError(validation_errors)
+        serializer._validated_data = validated_data
         self.perform_bulk_update(serializer)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
